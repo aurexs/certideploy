@@ -241,39 +241,47 @@ downloadCerts() {
   for file in $FILES_REQ; do
     info "Descargando $CERTS_URL/$file"
     local filename
+    local filepath
     filename="$file"
+    filepath="$PUBLISH_DIR/$file"
 
-    [ "$file" == "$_DOMAIN.cer" ] && ! is_empty "$_f_cert" && filename="$_f_cert"
-    [ "$file" == "fullchain.cer" ] && ! is_empty "$_f_fullchain" && filename="$_f_fullchain"
-    [ "$file" == "ca.cer" ] && ! is_empty "$_f_ca" && filename="$_f_ca"
+    # [ "$file" == "$_DOMAIN.cer" ] && ! is_empty "$_f_cert" && filename="$_f_cert"
+    # [ "$file" == "ca.cer" ] && ! is_empty "$_f_ca" && filename="$_f_ca"
 
-    # local cmd="$curl_cmd "$CERTS_URL/$file" > "$PUBLISH_DIR/$filename""
+    if [ "$file" == "fullchain.cer" ] && ! is_empty "$_f_fullchain"; then
+      filepath_copy="$_f_fullchain"
+      # filename=${_f_fullchain##*/}
+    fi
+
+    # local cmd="$curl_cmd "$CERTS_URL/$file" > "$filepath""
     # debug "$cmd"
 
     if ! $TESTMODE; then
       # backup
-      is_file "$PUBLISH_DIR/$filename" && cp -p "$PUBLISH_DIR/$filename" "$PUBLISH_DIR/$filename.bak"
+      is_file "$filepath" && cp -p "$filepath" "$filepath.bak"
 
       # download
-      if ! $curl_cmd "$CERTS_URL/$file" > "$PUBLISH_DIR/$filename"; then
-        is_file "$PUBLISH_DIR/$filename.bak" && cat "$PUBLISH_DIR/$filename.bak" > "$PUBLISH_DIR/$filename"
-        error "$(__red "No se pudo descargar $CERTS_URL/$file")"
+      if ! $curl_cmd "$CERTS_URL/$file" > "$filepath"; then
+        is_file "$filepath.bak" && cat "$filepath.bak" > "$filepath"
+        error "$(__red "No se pudo descargar $CERTS_URL/$file") a $filepath"
+      else
+        ! is_empty "$_f_fullchain" && cat $filepath > $filepath_copy
       fi;
 
       # verificar
-      strIsA_PEM "$(cat "$PUBLISH_DIR/$filename")"
+      strIsA_PEM "$(cat "$filepath")"
       isA_PEM_File=$?
       if [ "$file" == "$_DOMAIN.cer" ] && [ "$isA_PEM_File" != "0" ]; then
-        debug "$(cat "$PUBLISH_DIR/$filename")"
-        if is_file "$PUBLISH_DIR/$filename.bak"; then
-          cat "$PUBLISH_DIR/$filename.bak" > "$PUBLISH_DIR/$filename"
+        debug "$(cat "$filepath")"
+        if is_file "$filepath.bak"; then
+          cat "$filepath.bak" > "$filepath"
         else
-          rm "$PUBLISH_DIR/$filename"
+          rm "$filepath"
         fi
-        error "Archivo descargado $(__red "NO es un certificado"): $PUBLISH_DIR/$filename"
+        error "Archivo descargado $(__red "NO es un certificado"): $filepath"
       fi
     else
-      debug "  Guardando a $PUBLISH_DIR/$filename"
+      debug "  Guardando a $filepath"
       local certStr
       if certStr=$($curl_cmd "$CERTS_URL/$file"); then
         strIsA_PEM "$certStr"
