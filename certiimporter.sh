@@ -252,7 +252,7 @@ downloadCerts() {
 
     if ! $TESTMODE; then
       # backup
-      is_file "$PUBLISH_DIR/$filename" && cp "$PUBLISH_DIR/$filename" "$PUBLISH_DIR/$filename.bak"
+      is_file "$PUBLISH_DIR/$filename" && cp -p "$PUBLISH_DIR/$filename" "$PUBLISH_DIR/$filename.bak"
 
       # download
       if ! $curl_cmd "$CERTS_URL/$file" > "$PUBLISH_DIR/$filename"; then
@@ -372,7 +372,7 @@ TESTMODE=false
 LOG_LEVEL=3
 
 remoteDate=""
-$FILES_REQ="_DOMAIN_.cer"
+FILES_REQ="_DOMAIN_.cer"
 
 _process() {
   while [ ${#} -gt 0 ]; do
