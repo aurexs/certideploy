@@ -26,6 +26,7 @@ nginx -t && nginx -s reload
 crontab -l | { cat; echo '19 01 */6 * * /root/certiimporter.sh -d uan.mx -a https://__URL__/certs -u __AUTH:PASS__ -o /etc/nginx/ssl -r "nginx -t && nginx -s reload" >> /root/certiimporter.log'; } | crontab -
 ```
 
+## Proxmox
 
 ### Instalación en Proxmox
 Proxmox necesita el certificado y la llave en las siguientes rutas:
