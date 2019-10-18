@@ -51,9 +51,11 @@ bgZvnAYPwgrah2l...6KTm2EH0NXe==
 -----END RSA PRIVATE KEY-----
 EOF
 cat /etc/ssl/certs/uan.mx/uan.mx.key > /etc/pve/local/pveproxy-ssl.key
+systemctl restart pveproxy
 ```
 
 ### Instalación de crontab para Proxmox
 ```
-crontab -l | { cat; echo '19 01 */6 * * /root/certiimporter.sh -d uan.mx -a https://__URL__/certs -u __AUTH:PASS__ -o /etc/ssl/certs --fullchain-file /etc/pve/local/pveproxy-ssl.pem -r "systemctl restart pveproxy" >> /root/certiimporter.log'; } | crontab -```
+crontab -l | { cat; echo '19 01 */6 * * /root/certiimporter.sh -d uan.mx -a https://__URL__/certs -u __AUTH:PASS__ -o /etc/ssl/certs --fullchain-file /etc/pve/local/pveproxy-ssl.pem -r "systemctl restart pveproxy" >> /root/certiimporter.log'; } | crontab -
+```
 
