@@ -265,7 +265,7 @@ downloadCerts() {
         is_file "$filepath.bak" && cat "$filepath.bak" > "$filepath"
         error "$(__red "No se pudo descargar $CERTS_URL/$file") a $filepath"
       else
-        ! is_empty "$_f_fullchain" && cat $filepath > $filepath_copy
+        ! is_empty "$filepath_copy" && cat $filepath > $filepath_copy
       fi;
 
       # verificar
