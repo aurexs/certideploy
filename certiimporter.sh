@@ -208,7 +208,7 @@ areDiffLocalRemote() {
   # Guarda su fecha de expiracion
   local localDate
   local remoteCert
-  local remoteDate
+  # local remoteDate
 
   localDate=$(getCertExpiryDate "$CERT_LOCAL")
 
@@ -225,7 +225,7 @@ areDiffLocalRemote() {
   # Verifica si son los mismos
   debug "Expiracion Cert  Local[$localDate]"
   debug "Expiracion Cert Remoto[$remoteDate]"
-  info "Certificado remoto es válido hasta $remoteDate"
+  debug "Certificado remoto es válido hasta $remoteDate"
 
   # TODO: Si esta expirado, alerta por slack
   #checkCertExpiryDate "$remoteDate"
@@ -359,7 +359,7 @@ doit () {
       debug "Local y remoto son diferentes, copiar nuevos"
       downloadCerts
     else
-      info "Local y remoto son los mismos, no hace nada"
+      info "Local y remoto son los mismos, no hace nada. Expira $remoteDate"
     fi
   fi;
 
@@ -371,6 +371,8 @@ SILENTMODE=false
 TESTMODE=false
 LOG_LEVEL=3
 
+remoteDate=""
+$FILES_REQ="_DOMAIN_.cer"
 
 _process() {
   while [ ${#} -gt 0 ]; do
@@ -404,7 +406,7 @@ _process() {
         _f_cert="$2"
         _validate_required "$@"
         ! is_writeable $_f_cert && error "No se puede abrir $_f_cert"
-        FILES_REQ="_DOMAIN_.cer $FILES_REQ"
+        # FILES_REQ="_DOMAIN_.cer $FILES_REQ"
         shift
         ;;
       --ca-file)
