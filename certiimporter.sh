@@ -4,8 +4,8 @@
 
 # PARAMS
 
-# Ruta a almacén de certificados en acme.sh
-_PUBLISH_DIR=/etc/nginx/ssl
+# Ruta a almacén de certificados
+_PUBLISH_DIR=/etc/pki/tls/certs
 # _MASK="0117"
 
 
@@ -18,7 +18,7 @@ readonly PROJECT_NAME_CASE="Certi Importer"
 readonly PROJECT="$PROJECT_NAME_CASE
 
     Busca el certificado en una URL y lo importa
-    al almacén de certificados.
+    al almacén de certificados local.
     Opcionalmente reinicia el servicio web.
 
     https://github.com/aurexs/certideploy"
@@ -37,17 +37,28 @@ showhelp() {
     PUBLISH_DIR=$_PUBLISH_DIR
 
     Uso: $PROJECT_NAME [opciones] -d domin.io
-    EJ: $PROJECT_NAME -V -d uan.edu.mx -a https://uan.mx/certs -u uan:contras -o /ssl
+    $PROJECT_NAME -d domin.io -a https://uan.mx/certs -o /ssl
+    $PROJECT_NAME -V -d domin.io -a https://uan.mx/certs \\
+                  -u user:password --fullchain-file /etc/nginx/ssl/domin.io.pem
 
     opciones:
-        -d    Nombre de Dominio/Certificado
-        -a    Url raiz donde está la carpeta del certificado
-        -o    Carpeta donde publicar los certificados /ssl -> /ssl/uan.mx/uan.mx.cer
-        -u    Usuario:contraseña para Basic Auth
-        -t    Solo verifica, no hace escrituras
-        -q    Modo silencioso
+        -d    *Nombre de Dominio/Certificado (debe coincidir con certipublisher)
+        -a    *Url raiz donde está la carpeta del certificado
+        -u    Usuario:contraseña para Basic Auth en certipublisher
+        -o    Carpeta donde publicar bundle. Ej: /etc/ssl -> /etc/ssl/domin.io/...
+              Si no se especifica, se intentará copiar a $_PUBLISH_DIR/domin.io/...
+              Por default se copian los siguientes archivos:
+                  domin.io.cer, ca.cer y fullchain.cer
+              O si se especifican las rutas individuales, solo se copiaran esos:
+        --fullchain-file  El cert+intermediario será copiado a este archivo
+        --cert-file       El cert del domin.io será copiado a este archivo
+        --ca-file         El cert intermediario será copiado a este archivo
+
+        -t    Modo pruebas. Solo verifica, no hace escrituras
+        -q    Modo silencioso, no muestra ningun log
         -V    Modo verbose, muestra log extendido
         -h    Opciones y ayuda
+
 EOF
 }
 
@@ -78,6 +89,12 @@ __red() {
     return
   fi
   printf -- "%b" "$1"
+}
+
+_contains() {
+  _str="$1"
+  _sub="$2"
+  echo "$_str" | grep "$_sub" >/dev/null 2>&1
 }
 
 _startswith() {
@@ -210,7 +227,7 @@ areDiffLocalRemote() {
   local remoteCert
   # local remoteDate
 
-  localDate=$(getCertExpiryDate "$CERT_LOCAL")
+  localDate=$(getCertExpiryDate "$VALIDATE_LOCAL")
 
   # Baja el certificado a variable
   debug "curl_cmd: $curl_cmd $CERT_REMOTE"
@@ -234,27 +251,30 @@ areDiffLocalRemote() {
 }
 
 downloadCerts() {
-  ! $TESTMODE && ! is_writeable "$_PUBLISH_DIR" && error "No se puede escribir en $_PUBLISH_DIR"
+  # ! $TESTMODE && ! is_writeable "$_PUBLISH_DIR" && error "No se puede escribir en $_PUBLISH_DIR"
 
   debug "Descargando certificados..."
 
   for file in $FILES_REQ; do
-    info "Descargando $CERTS_URL/$file"
-    local filename
+    info "😋 Descargando $CERTS_URL/$file"
     local filepath
-    filename="$file"
-    filepath="$PUBLISH_DIR/$file"
+    local filename
+    local basepath
 
-    # [ "$file" == "$_DOMAIN.cer" ] && ! is_empty "$_f_cert" && filename="$_f_cert"
-    # [ "$file" == "ca.cer" ] && ! is_empty "$_f_ca" && filename="$_f_ca"
-
-    if [ "$file" == "fullchain.cer" ] && ! is_empty "$_f_fullchain"; then
-      filepath_copy="$_f_fullchain"
-      # filename=${_f_fullchain##*/}
-    fi
+    [ "$file" == "$_DOMAIN.cer" ]  && filepath="$CERT_LOCAL"
+    [ "$file" == "ca.cer" ]        && filepath="$CA_LOCAL"
+    [ "$file" == "fullchain.cer" ] && filepath="$FULLCHAIN_LOCAL"
+    basepath=$(dirname "${filepath}")
+    filename=$(basename "${filepath}")
 
     # local cmd="$curl_cmd "$CERTS_URL/$file" > "$filepath""
     # debug "$cmd"
+
+
+
+    if ! is_writeable "$filepath"; then       # No existe archivo, se intentara crear si la carpeta es escribible
+      ! is_writeable "$basepath" && error "🤔 No se puede escribir $filename. Primero créalo con 'touch $filepath' y asignale permisos de seguridad"
+    fi
 
     if ! $TESTMODE; then
       # backup
@@ -263,50 +283,54 @@ downloadCerts() {
       # download
       if ! $curl_cmd "$CERTS_URL/$file" > "$filepath"; then
         is_file "$filepath.bak" && cat "$filepath.bak" > "$filepath"
-        error "$(__red "No se pudo descargar $CERTS_URL/$file") a $filepath"
-      else
-        ! is_empty "$filepath_copy" && cat "$filepath" > "$filepath_copy"
+        rm -f "$filepath.bak"
+        error "$(__red "🤔 No se pudo descargar $CERTS_URL/$file") a $filepath"
       fi;
 
       # verificar
       strIsA_PEM "$(cat "$filepath")"
       isA_PEM_File=$?
-      if [ "$file" == "$_DOMAIN.cer" ] && [ "$isA_PEM_File" != "0" ]; then
+      if [ "${file##*.}" == "cer" ] && [ "$isA_PEM_File" != "0" ]; then
         debug "$(cat "$filepath")"
         if is_file "$filepath.bak"; then
           cat "$filepath.bak" > "$filepath"
+          rm -f "$filepath.bak"
         else
           rm "$filepath"
         fi
-        error "Archivo descargado $(__red "NO es un certificado"): $filepath"
+        error "🤔 Archivo descargado $(__red "NO es un certificado PEM") o está corrupto: $filepath"
       fi
+
+      # ok
+      info "    $(__red "$file") -> $(__green "$(readlink -m $filepath)")"
     else
       debug "  Guardando a $filepath"
       local certStr
       if certStr=$($curl_cmd "$CERTS_URL/$file"); then
         strIsA_PEM "$certStr"
         isA_PEM_File=$?
-        if [ "$file" == "$_DOMAIN.cer" ] && [ "$isA_PEM_File" != "0" ]; then
+        if [ "${file##*.}" == "cer" ] && [ "$isA_PEM_File" != "0" ]; then
           debug "$certStr"
-          error "Archivo descargado $(__red "NO es un certificado"): $CERTS_URL/$file"
+          error " 🤔 Archivo a descargar $(__red "NO es un certificado PEM") o está corrupto: $CERTS_URL/$file"
         fi
       else
-        error "$(__red "No se pudo descargar $CERTS_URL/$file")"
+        error "🤔 $(__red "No se pudo descargar $CERTS_URL/$file")"
       fi
+
+      info "    $(__red "$file") -> $(__green "$(readlink -m $filepath)")"
     fi
   done
 
-  info "$(__green "Certificados exportados a $PUBLISH_DIR")"
-  info "Llave privada se debe exportar manualmente a $PUBLISH_DIR/$_DOMAIN.key"
+  info "👍  $(__green Exportados). Llave privada se debe exportar manualmente a $_DOMAIN.key"
 
   # Ejecutar reload-cmd
   if [ "$_reload_cmd" ]; then
-    info "Ejecutando reload cmd: $_reload_cmd"
+    info "💣 Ejecutando reload cmd: $_reload_cmd"
     if $TESTMODE; then
       warn "En modo testing no se ejecuta el comando reload"
     elif (
       export DOMAIN="$_DOMAIN"
-      cd "$PUBLISH_DIR" && eval "$_reload_cmd"
+      cd "$basepath" && eval "$_reload_cmd"
     ); then
       info "$(__green "Reload OK")"
     else
@@ -316,8 +340,8 @@ downloadCerts() {
 }
 
 doit () {
-  is_empty "$_DOMAIN" && error "Falta nombre de dominio"
-  is_empty "$_URL" && error "Falta url para bajar certificados"
+  is_empty "$_DOMAIN" && error "🤔 Falta nombre de dominio"
+  is_empty "$_URL" && error "🤔 Falta url para bajar certificados"
 
   _check_program openssl
   _check_program curl
@@ -325,10 +349,15 @@ doit () {
   _CURL=$(which curl 2>/dev/null)
   _CURL="$_CURL -L -m 15 --silent --user-agent \"$USER_AGENT\""
 
-
-  FILES_REQ="$_DOMAIN.cer ca.cer fullchain.cer" # $_DOMAIN.pfx solo si se exporta, $_DOMAIN.key se debe distribuir a mano 
   CERTS_URL="$_URL/$_DOMAIN"
   CERT_REMOTE="$_URL/$_DOMAIN/$_DOMAIN.cer"
+  
+  FILES_REQ="$_DOMAIN.cer ca.cer fullchain.cer" # $_DOMAIN.pfx solo si se exporta, $_DOMAIN.key se debe distribuir a mano 
+
+  ! is_empty "$FILES_REQ_PARAM" && FILES_REQ="$FILES_REQ_PARAM"
+  is_empty "$_PUBLISH_DIR"      && _PUBLISH_DIR="/etc/pki/tls/certs"
+
+  [ "$FILES_REQ" = " ca.cer" ] && error "🤔 Se debe especificar por lo menos el $_DOMAIN.cer o el fullchain.cer"
 
   PUBLISH_DIR="$_PUBLISH_DIR/$_DOMAIN"            # /etc/ssl/uan.mx
   CERT_LOCAL="$PUBLISH_DIR/$_DOMAIN.cer"          # /etc/ssl/uan.mx/uan.mx.cer
@@ -342,22 +371,34 @@ doit () {
   curl_cmd="$_CURL"
   ! is_empty "$_PASS" && curl_cmd="$curl_cmd -u $_PASS"
 
+  if _contains "$FILES_REQ" "$_DOMAIN.cer"; then
+    VALIDATE_LOCAL="$CERT_LOCAL"
+  else
+    VALIDATE_LOCAL="$FULLCHAIN_LOCAL"
+  fi
 
   debug "  CERTS_URL $CERTS_URL"
   debug "CERT_REMOTE $CERT_REMOTE"
-  debug "PUBLISH_DIR $PUBLISH_DIR"
-  debug " CERT_LOCAL $CERT_LOCAL"
+  debug "VALID LOCAL $(__green "$VALIDATE_LOCAL")"
+  debug "FILES 2COPY $(__green "$FILES_REQ")"
+  ! is_empty "$_f_cert"      && debug "$(__red $_DOMAIN.cer) -> $(__green "$(readlink -m $_f_cert)")"
+  ! is_empty "$_f_ca"        && debug "       $(__red ca.cer) -> $(__green "$(readlink -m $_f_ca)")"
+  ! is_empty "$_f_fullchain" && debug "$(__red fullchain.cer) -> $(__green "$(readlink -m $_f_fullchain)")"
+
+  is_empty "$FILES_REQ_PARAM" && debug "PUBLISH_DIR $PUBLISH_DIR"
   debug "       CURL $curl_cmd"
 
 
   # Verifica que exista certificado viejo, sino se importan nuevos
-  if ! is_readable "$CERT_LOCAL"; then
-    info "No existe $CERT_LOCAL, se van a intentar importar como nuevos"
-    if ! is_writeable "$PUBLISH_DIR"; then
-      ! is_writeable "$_PUBLISH_DIR" && error "No hay cert locales y No se puede escribir en $_PUBLISH_DIR"
+  if ! is_readable "$VALIDATE_LOCAL"; then
+    info "No existe $VALIDATE_LOCAL, se van a intentar importar como nuevos"
+
+    # Si no se pidieron por separado, verifica carpeta del bundle
+    if is_empty "$FILES_REQ_PARAM" && ! is_writeable "$PUBLISH_DIR"; then
+      ! is_writeable "$_PUBLISH_DIR" && error "🤔 No hay cert locales y No se puede escribir en $_PUBLISH_DIR"
       debug "No existe $PUBLISH_DIR, creando nuevo"
       if ! $TESTMODE; then
-        mkdir -p "$PUBLISH_DIR" || error "No se pudo crear $PUBLISH_DIR"
+        mkdir -p "$PUBLISH_DIR" || error "🤔 No se pudo crear $PUBLISH_DIR"
       fi
     fi
 
@@ -365,6 +406,7 @@ doit () {
   else
     if areDiffLocalRemote; then
       debug "Local y remoto son diferentes, copiar nuevos"
+
       downloadCerts
     else
       info "Local y remoto son los mismos, no hace nada. Expira $remoteDate"
@@ -380,7 +422,7 @@ TESTMODE=false
 LOG_LEVEL=3
 
 remoteDate=""
-FILES_REQ="_DOMAIN_.cer"
+FILES_REQ_PARAM=""
 
 _process() {
   while [ ${#} -gt 0 ]; do
@@ -413,22 +455,22 @@ _process() {
       --cert-file)
         _f_cert="$2"
         _validate_required "$@"
-        ! is_writeable $_f_cert && error "No se puede abrir $_f_cert"
-        # FILES_REQ="_DOMAIN_.cer $FILES_REQ"
+        # ! is_writeable $_f_cert && error "No se puede escribir --cert-file. Primero créalo con touch $_f_cert"
+        FILES_REQ_PARAM="$FILES_REQ_PARAM _DOMAIN_.cer"
         shift
         ;;
       --ca-file)
         _f_ca="$2"
         _validate_required "$@"
-        ! is_writeable $_f_ca && error "No se puede abrir $_f_ca"
-        FILES_REQ="$FILES_REQ ca.cer"
+        # ! is_writeable $_f_ca && error "No se puede abrir $_f_ca"
+        FILES_REQ_PARAM="$FILES_REQ_PARAM ca.cer"
         shift
         ;;
       --fullchain-file)
         _f_fullchain="$2"
         _validate_required "$@"
-        ! is_writeable $_f_fullchain && error "No se puede abrir $_f_fullchain"
-        FILES_REQ="$FILES_REQ fullchain.cer"
+        # ! is_writeable $_f_fullchain && error "No se puede abrir $_f_fullchain"
+        FILES_REQ_PARAM="$FILES_REQ_PARAM fullchain.cer"
         shift
         ;;
       --quiet | -q)
